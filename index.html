@@ -1,12 +1,212 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<title>smallpo 科技</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能体管理器</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .agent-card {
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .agent-card:hover {
+            transform: translateY(-5px);
+        }
+        .config-preview {
+            max-height: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
 </head>
- 
 <body>
-<a1>Hello!<a1>
+    <div class="container py-4">
+        <!-- 头部 -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>智能体管理器</h1>
+            <div>
+                <button class="btn btn-primary me-2" onclick="showEditor()">
+                    <i class="bi bi-plus-lg"></i> 新建智能体
+                </button>
+                <div class="btn-group">
+                    <input type="file" id="importFile" hidden accept=".agent">
+                    <button class="btn btn-outline-secondary" onclick="document.getElementById('importFile').click()">
+                        导入
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="exportAgents()">
+                        导出
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 智能体列表 -->
+        <div id="agentList" class="row row-cols-1 row-cols-md-3 g-4"></div>
+
+        <!-- 编辑模态框 -->
+        <div class="modal fade" id="editorModal">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">智能体编辑器</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="agentForm" onsubmit="return saveAgent(event)">
+                            <input type="hidden" id="editIndex">
+                            <div class="mb-3">
+                                <label class="form-label">名称 *</label>
+                                <input type="text" class="form-control" id="agentName" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">描述</label>
+                                <textarea class="form-control" id="agentDescription" rows="2"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">配置参数 (JSON)</label>
+                                <textarea class="form-control font-monospace" id="agentConfig" 
+                                          rows="8" required>{
+    "model": "DeepSeek R1",
+    "temperature": 0.7
+}</textarea>
+                            </div>
+                            <div class="d-flex justify-content-end">
+                                <button type="button" class="btn btn-secondary me-2" 
+                                        data-bs-dismiss="modal">取消</button>
+                                <button type="submit" class="btn btn-primary">保存</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 初始化存储
+        let agents = JSON.parse(localStorage.getItem('agents') || '[]');
+        
+        // 页面加载时渲染列表
+        window.addEventListener('DOMContentLoaded', renderAgents);
+
+        // 渲染智能体列表
+        function renderAgents() {
+            const container = document.getElementById('agentList');
+            container.innerHTML = agents.map((agent, index) => `
+                <div class="col">
+                    <div class="card h-100 agent-card" ondblclick="showEditor(${index})">
+                        <div class="card-body">
+                            <h5 class="card-title">${agent.name}</h5>
+                            <p class="card-text text-muted">${agent.description || '暂无描述'}</p>
+                            <div class="config-preview bg-light p-2 rounded mb-2">
+                                <small class="text-muted font-monospace">${agent.config.slice(0, 80)}...</small>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">${new Date(agent.timestamp).toLocaleString()}</small>
+                                <button class="btn btn-sm btn-outline-danger" 
+                                        onclick="deleteAgent(${index})">删除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 显示编辑器
+        function showEditor(index = -1) {
+            const modal = new bootstrap.Modal('#editorModal');
+            const form = document.getElementById('agentForm');
+            form.reset();
+            
+            if (index >= 0) {
+                const agent = agents[index];
+                document.getElementById('editIndex').value = index;
+                document.getElementById('agentName').value = agent.name;
+                document.getElementById('agentDescription').value = agent.description;
+                document.getElementById('agentConfig').value = agent.config;
+            }
+            
+            modal.show();
+        }
+
+        // 保存智能体
+        function saveAgent(e) {
+            e.preventDefault();
+            
+            const agent = {
+                name: document.getElementById('agentName').value.trim(),
+                description: document.getElementById('agentDescription').value.trim(),
+                config: document.getElementById('agentConfig').value.trim(),
+                timestamp: Date.now()
+            };
+
+            // 验证JSON格式
+            try {
+                JSON.parse(agent.config);
+            } catch {
+                alert('配置参数必须是有效的JSON格式');
+                return false;
+            }
+
+            const index = document.getElementById('editIndex').value;
+            if (index) {
+                agents[index] = agent; // 更新
+            } else {
+                agents.push(agent); // 新建
+            }
+
+            localStorage.setItem('agents', JSON.stringify(agents));
+            renderAgents();
+            bootstrap.Modal.getInstance('#editorModal').hide();
+            return false;
+        }
+
+        // 删除智能体
+        function deleteAgent(index) {
+            if (confirm('确定要删除这个智能体吗？')) {
+                agents.splice(index, 1);
+                localStorage.setItem('agents', JSON.stringify(agents));
+                renderAgents();
+            }
+        }
+
+        // 导出智能体
+        function exportAgents() {
+            if (agents.length === 0) return alert('没有可导出的智能体');
+            
+            const data = JSON.stringify(agents, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `agents_${Date.now()}.agent`;
+            a.click();
+            
+            URL.revokeObjectURL(url);
+        }
+
+        // 导入智能体
+        document.getElementById('importFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function() {
+                try {
+                    const imported = JSON.parse(this.result);
+                    agents = [...agents, ...imported];
+                    localStorage.setItem('agents', JSON.stringify(agents));
+                    renderAgents();
+                    alert(`成功导入 ${imported.length} 个智能体`);
+                } catch {
+                    alert('文件格式无效');
+                }
+            };
+            reader.readAsText(file);
+        });
+    </script>
 </body>
- 
 </html>

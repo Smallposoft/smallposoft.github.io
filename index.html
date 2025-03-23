@@ -18,6 +18,9 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .import-status {
+            min-height: 40px;
+        }
     </style>
 </head>
 <body>
@@ -27,16 +30,40 @@
             <h1>智能体管理器</h1>
             <div>
                 <button class="btn btn-primary me-2" onclick="showEditor()">
-                    <i class="bi bi-plus-lg"></i> 新建智能体
+                    新建智能体
                 </button>
                 <div class="btn-group">
-                    <input type="file" id="importFile" hidden accept=".agent">
-                    <button class="btn btn-outline-secondary" onclick="document.getElementById('importFile').click()">
+                    <button type="button" class="btn btn-outline-secondary dropdown-toggle" 
+                            data-bs-toggle="dropdown" aria-expanded="false">
                         导入
                     </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#" onclick="showUrlImport()">通过链接导入</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="document.getElementById('fileImport').click()">通过文件导入</a></li>
+                    </ul>
                     <button class="btn btn-outline-secondary" onclick="exportAgents()">
                         导出
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- URL导入模态框 -->
+        <div class="modal fade" id="urlImportModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">链接导入</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="input-group mb-3">
+                            <input type="url" id="importUrl" class="form-control" 
+                                  placeholder="请输入数据URL地址" required>
+                            <button class="btn btn-primary" onclick="importFromUrl()">加载</button>
+                        </div>
+                        <div id="importStatus" class="import-status"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -64,10 +91,10 @@
                                 <textarea class="form-control" id="agentDescription" rows="2"></textarea>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label">配置参数 (JSON)</label>
+                                <label class="form-label">配置参数 (JSON) *</label>
                                 <textarea class="form-control font-monospace" id="agentConfig" 
-                                          rows="8" required>{
-    "model": "DeepSeek R1",
+                                        rows="8" required>{
+    "model": "gpt-3.5",
     "temperature": 0.7
 }</textarea>
                             </div>
@@ -81,12 +108,15 @@
                 </div>
             </div>
         </div>
+
+        <!-- 隐藏的文件输入 -->
+        <input type="file" id="fileImport" hidden accept=".agent">
     </div>
 
     <script src="https://cdn.bootcdn.net/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
     <script>
         // 初始化存储
-        let agents = JSON.parse(localStorage.getItem('agents') || '[]');
+        let agents = JSON.parse(localStorage.getItem('agents') || [];
         
         // 页面加载时渲染列表
         window.addEventListener('DOMContentLoaded', renderAgents);
@@ -106,7 +136,7 @@
                             <div class="d-flex justify-content-between align-items-center">
                                 <small class="text-muted">${new Date(agent.timestamp).toLocaleString()}</small>
                                 <button class="btn btn-sm btn-outline-danger" 
-                                        onclick="deleteAgent(${index})">删除</button>
+                                        onclick="deleteAgent(${index}, event)">删除</button>
                             </div>
                         </div>
                     </div>
@@ -164,7 +194,8 @@
         }
 
         // 删除智能体
-        function deleteAgent(index) {
+        function deleteAgent(index, event) {
+            event.stopPropagation();
             if (confirm('确定要删除这个智能体吗？')) {
                 agents.splice(index, 1);
                 localStorage.setItem('agents', JSON.stringify(agents));
@@ -188,8 +219,8 @@
             URL.revokeObjectURL(url);
         }
 
-        // 导入智能体
-        document.getElementById('importFile').addEventListener('change', function(e) {
+        // 文件导入
+        document.getElementById('fileImport').addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
             
@@ -197,16 +228,99 @@
             reader.onload = function() {
                 try {
                     const imported = JSON.parse(this.result);
-                    agents = [...agents, ...imported];
+                    const newAgents = imported.filter(newAgent => 
+                        !agents.some(existingAgent => 
+                            existingAgent.timestamp === newAgent.timestamp && 
+                            existingAgent.name === newAgent.name
+                        )
+                    );
+                    
+                    agents.push(...newAgents);
                     localStorage.setItem('agents', JSON.stringify(agents));
                     renderAgents();
-                    alert(`成功导入 ${imported.length} 个智能体`);
+                    alert(`成功导入 ${newAgents.length} 个智能体，跳过 ${imported.length - newAgents.length} 个重复项`);
                 } catch {
                     alert('文件格式无效');
                 }
             };
             reader.readAsText(file);
         });
+
+        // 显示URL导入模态框
+        function showUrlImport() {
+            document.getElementById('importUrl').value = '';
+            document.getElementById('importStatus').innerHTML = '';
+            new bootstrap.Modal('#urlImportModal').show();
+        }
+
+        // 从URL导入数据
+        async function importFromUrl() {
+            const url = document.getElementById('importUrl').value.trim();
+            const statusDiv = document.getElementById('importStatus');
+            statusDiv.innerHTML = '<div class="text-info">正在验证链接...</div>';
+            
+            if (!url) {
+                statusDiv.innerHTML = '<div class="text-danger">请输入有效的URL地址</div>';
+                return;
+            }
+
+            try {
+                statusDiv.innerHTML = '<div class="text-info">正在获取数据...</div>';
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`请求失败: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                if (!Array.isArray(data)) {
+                    throw new Error('数据格式应为数组');
+                }
+
+                // 验证数据格式
+                const isValid = data.every(item => 
+                    item.name && item.config && item.timestamp
+                );
+                
+                if (!isValid) {
+                    throw new Error('数据缺少必要字段');
+                }
+
+                // 去重处理
+                const newAgents = data.filter(newAgent => 
+                    !agents.some(existingAgent => 
+                        existingAgent.timestamp === newAgent.timestamp && 
+                        existingAgent.name === newAgent.name
+                    )
+                );
+
+                agents.push(...newAgents);
+                localStorage.setItem('agents', JSON.stringify(agents));
+                renderAgents();
+
+                statusDiv.innerHTML = `
+                    <div class="text-success">
+                        成功导入 ${newAgents.length} 个智能体
+                        ${newAgents.length < data.length ? 
+                            `（跳过 ${data.length - newAgents.length} 个重复项）` : ''}
+                    </div>
+                `;
+
+                // 3秒后自动关闭
+                setTimeout(() => {
+                    bootstrap.Modal.getInstance('#urlImportModal').hide();
+                }, 3000);
+
+            } catch (error) {
+                statusDiv.innerHTML = `
+                    <div class="text-danger">
+                        导入失败: ${error.message}
+                    </div>
+                `;
+                console.error('导入错误:', error);
+            }
+        }
     </script>
 </body>
 </html>
